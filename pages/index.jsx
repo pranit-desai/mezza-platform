@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
+import { supabase } from '../lib/supabaseClient';
 
 const V0 = [
   {id:'v01',gn:'CLAW RESTAURANT L.L.C',vn:'Claw BBQ',rg:'UAE',rev:44350000,fin:83,red:84,mz:83,ceil:4,la:1770000,vr:1,pi:150000,p1:200000,p2:800000,an:'Pranit',poc:'Justin',dt:'2026-03-25',loc:'Marsa Dubai',url:'',str:['Strongest overall profile — near-zero debt, lean cost structure, premium spend','High card revenue traceability above 90%','Low rent-to-revenue ratio at 4.8%, well below threshold'],wk:['Single location concentration; minor H2 revenue softening','Limited diversification across venues'],dec:'Approved',rat:'Strong Profile'},
@@ -115,51 +116,88 @@ export default function App() {
   const [globalDisb, setGlobalDisb] = useState('Recommended');
   const [grpDisb, setGrpDisb] = useState({});
   const [tracker, setTracker] = useState({}); // {groupName: {status,pilotAmt,pilotDate,p1Amt,p1Date,p2Date,notes}}
+  const [loading, setLoading] = useState(true);
   const fileRef = useRef(null);
 
   const empty = { gn: '', vn: '', rg: 'UAE', rev: 0, fin: 0, red: 0, mz: null, ceil: 0, la: 0, vr: 0, pi: 0, p1: 0, p2: 0, an: 'Pranit', poc: 'Justin', dt: new Date().toISOString().split('T')[0], loc: '', url: '', str: [''], wk: [''] };
   const [form, setForm] = useState(empty);
 
   useEffect(() => {
-    let ok = true;
+    let mounted = true;
     (async () => {
-      try {
-        const r = await window.storage.get('mezza-v8c');
-        if (ok && r && r.value) {
-          const d = JSON.parse(r.value);
-          if (d.v?.length) { setVenues(d.v); setDecs(d.d || {}); setRats(d.r || {}); setGrpDisb(d.gd || {}); setTracker(d.tk || {}); return; }
-        }
-      } catch (e) {}
-      if (ok) {
-        setVenues(V0);
-        const dc = {}, rt = {};
-        V0.forEach(x => { if (x.dec) dc[x.gn] = x.dec; if (x.rat) rt[x.gn] = x.rat; });
-        setDecs(dc); setRats(rt);
+      const [{ data: vd }, { data: gd }, { data: td }] = await Promise.all([
+        supabase.from('venues').select('*').order('id'),
+        supabase.from('groups').select('*'),
+        supabase.from('tracker').select('*'),
+      ]);
+      if (!mounted) return;
+      if (vd?.length) setVenues(vd);
+      if (gd?.length) {
+        const dc = {}, rt = {}, gdMap = {};
+        gd.forEach(row => {
+          if (row.dec) dc[row.gn] = row.dec;
+          if (row.rat) rt[row.gn] = row.rat;
+          gdMap[row.gn] = { mode: row.mode || 'Recommended', customAmt: row.custom_amt || 0, p1Amt: row.p1_amt || 0, p2Amt: row.p2_amt || 0, pilotDisbursed: row.pilot_disbursed || 0, p1Disbursed: row.p1_disbursed || 0, p2Disbursed: row.p2_disbursed || 0 };
+        });
+        setDecs(dc); setRats(rt); setGrpDisb(gdMap);
       }
+      if (td?.length) {
+        const tk = {};
+        td.forEach(row => { tk[row.gn] = { status: row.status || '', pilotAmt: row.pilot_amt || 0, pilotDate: row.pilot_date || '', p1Amt: row.p1_amt || 0, p1Date: row.p1_date || '', p2Date: row.p2_date || '', notes: row.notes || '' }; });
+        setTracker(tk);
+      }
+      if (mounted) setLoading(false);
     })();
-    return () => { ok = false; };
+    return () => { mounted = false; };
   }, []);
 
-  const persist = useCallback((v, d, r, gd, tk) => { try { window.storage.set('mezza-v8c', JSON.stringify({ v, d, r, gd, tk })); } catch (e) {} }, []);
+  const saveGrp = async (gn, d, r, gd) => {
+    const g = gd[gn] || {};
+    await supabase.from('groups').upsert({ gn, dec: d[gn] || 'Pending', rat: r[gn] || '', mode: g.mode || 'Recommended', custom_amt: g.customAmt || 0, p1_amt: g.p1Amt || 0, p2_amt: g.p2Amt || 0, pilot_disbursed: g.pilotDisbursed || 0, p1_disbursed: g.p1Disbursed || 0, p2_disbursed: g.p2Disbursed || 0 }, { onConflict: 'gn' });
+  };
+  const saveTk = async (gn, tk) => {
+    const t = tk[gn] || {};
+    await supabase.from('tracker').upsert({ gn, status: t.status || '', pilot_amt: t.pilotAmt || 0, pilot_date: t.pilotDate || null, p1_amt: t.p1Amt || 0, p1_date: t.p1Date || null, p2_date: t.p2Date || null, notes: t.notes || '' }, { onConflict: 'gn' });
+  };
 
   const saveVenue = () => {
     if (!form.gn || !form.vn) return;
     const m = form.mz != null && form.mz !== '' ? +form.mz : Math.round(form.fin * 0.7 + form.red * 0.3);
     const entry = { ...form, mz: m, pi: (form.p2 || 0) * 0.2, id: editId || Date.now().toString(36) + Math.random().toString(36).substr(2, 5), str: (form.str || []).filter(Boolean), wk: (form.wk || []).filter(Boolean) };
     const u = editId ? venues.map(x => x.id === editId ? entry : x) : [...venues, entry];
-    setVenues(u); persist(u, decs, rats, grpDisb, tracker); setForm(empty); setEditId(null); setShowForm(false);
+    setVenues(u);
+    supabase.from('venues').upsert(entry, { onConflict: 'id' });
+    setForm(empty); setEditId(null); setShowForm(false);
   };
-  const delV = id => { const u = venues.filter(x => x.id !== id); setVenues(u); persist(u, decs, rats, grpDisb, tracker); };
+  const delV = id => { const u = venues.filter(x => x.id !== id); setVenues(u); supabase.from('venues').delete().eq('id', id); };
   const editV = v => { setForm({ ...v, str: v.str?.length ? v.str : [''], wk: v.wk?.length ? v.wk : [''] }); setEditId(v.id); setShowForm(true); };
-  const setDc = (g, val) => { const d = { ...decs, [g]: val }; setDecs(d); persist(venues, d, rats, grpDisb, tracker); };
-  const setRt = (g, val) => { const r = { ...rats, [g]: val }; setRats(r); persist(venues, decs, r, grpDisb, tracker); };
-  const setGD = (g, patch) => { const gd = { ...grpDisb, [g]: { ...(grpDisb[g] || {}), ...patch } }; setGrpDisb(gd); persist(venues, decs, rats, gd, tracker); };
-  const setTk = (g, patch) => { const tk = { ...tracker, [g]: { ...(tracker[g] || {}), ...patch } }; setTracker(tk); persist(venues, decs, rats, grpDisb, tk); };
+  const setDc = (g, val) => { const d = { ...decs, [g]: val }; setDecs(d); saveGrp(g, d, rats, grpDisb); };
+  const setRt = (g, val) => { const r = { ...rats, [g]: val }; setRats(r); saveGrp(g, decs, r, grpDisb); };
+  const setGD = (g, patch) => { const gd = { ...grpDisb, [g]: { ...(grpDisb[g] || {}), ...patch } }; setGrpDisb(gd); saveGrp(g, decs, rats, gd); };
+  const setTk = (g, patch) => { const tk = { ...tracker, [g]: { ...(tracker[g] || {}), ...patch } }; setTracker(tk); saveTk(g, tk); };
   const disbModeFor = gn => (grpDisb[gn]?.mode) || globalDisb;
 
   const exportCSV = () => { const rows = venues.map(v => [v.gn, v.vn, v.fin, v.red, v.mz, gB(v.mz).g, v.rev, v.la, v.pi, v.p1, v.p2, v.an, v.poc, v.dt, v.loc].map(c => `"${c}"`).join(',')); const csv = 'Group,Venue,Fin,Red,Mezza,Grade,Rev,Lending,Pilot,P1,P2,Analyst,POC,Date,Loc\n' + rows.join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'mezza.csv'; a.click(); };
   const exportJSON = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify({ v: venues, d: decs, r: rats, gd: grpDisb, tk: tracker }, null, 2)], { type: 'application/json' })); a.download = 'mezza.json'; a.click(); };
-  const importJSON = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { try { const d = JSON.parse(ev.target.result); if (d.v) { setVenues(d.v); setDecs(d.d || {}); setRats(d.r || {}); setGrpDisb(d.gd || {}); setTracker(d.tk || {}); persist(d.v, d.d || {}, d.r || {}, d.gd || {}, d.tk || {}); } } catch (err) { alert('Invalid'); } }; r.readAsText(f); };
+  const importJSON = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = async ev => {
+      try {
+        const d = JSON.parse(ev.target.result);
+        if (d.v) {
+          setVenues(d.v); setDecs(d.d || {}); setRats(d.r || {}); setGrpDisb(d.gd || {}); setTracker(d.tk || {});
+          await supabase.from('venues').upsert(d.v, { onConflict: 'id' });
+          const gnSet = new Set([...Object.keys(d.d || {}), ...Object.keys(d.r || {}), ...Object.keys(d.gd || {})]);
+          const grpRows = [...gnSet].map(gn => { const g = (d.gd || {})[gn] || {}; return { gn, dec: (d.d || {})[gn] || 'Pending', rat: (d.r || {})[gn] || '', mode: g.mode || 'Recommended', custom_amt: g.customAmt || 0, p1_amt: g.p1Amt || 0, p2_amt: g.p2Amt || 0, pilot_disbursed: g.pilotDisbursed || 0, p1_disbursed: g.p1Disbursed || 0, p2_disbursed: g.p2Disbursed || 0 }; });
+          if (grpRows.length) await supabase.from('groups').upsert(grpRows, { onConflict: 'gn' });
+          const tkRows = Object.entries(d.tk || {}).map(([gn, t]) => ({ gn, status: t.status || '', pilot_amt: t.pilotAmt || 0, pilot_date: t.pilotDate || null, p1_amt: t.p1Amt || 0, p1_date: t.p1Date || null, p2_date: t.p2Date || null, notes: t.notes || '' }));
+          if (tkRows.length) await supabase.from('tracker').upsert(tkRows, { onConflict: 'gn' });
+        }
+      } catch (err) { alert('Invalid'); }
+    };
+    r.readAsText(f);
+  };
 
   const handleAIF = e => { Promise.all(Array.from(e.target.files).map(f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res({ name: f.name, type: f.type, data: r.result.split(',')[1] }); r.onerror = rej; r.readAsDataURL(f); }))).then(setAiFiles); };
   const parseAI = async () => { setAiLoading(true); try { const parts = []; aiFiles.forEach(f => { if (f.type.startsWith('image/')) parts.push({ type: 'image', source: { type: 'base64', media_type: f.type, data: f.data } }); }); let p = 'Extract venue data. Return ONLY JSON:\n{"gn":"","vn":"","fin":0,"red":0,"mz":null,"rev":0,"ceil":0,"la":0,"vr":0,"pi":0,"p1":0,"p2":0,"dt":"YYYY-MM-DD","an":"","poc":"","rg":"UAE","loc":"","url":"","str":[""],"wk":[""]}\n'; if (aiUrls) p += '\nURLs: ' + aiUrls; if (aiText) p += '\n' + aiText; parts.push({ type: 'text', text: p }); const resp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, messages: [{ role: 'user', content: parts }] }) }); const data = await resp.json(); const t = data.content.find(i => i.type === 'text')?.text || ''; setAiResult(JSON.parse(t.replace(/```json|```/g, '').trim())); } catch (err) { alert('Error: ' + err.message); } finally { setAiLoading(false); } };
@@ -183,6 +221,8 @@ export default function App() {
   all.forEach(x => { if (!allGrps[x.gn]) allGrps[x.gn] = []; allGrps[x.gn].push(x); });
   const totalSelDisb = Object.entries(allGrps).reduce((s, [gn, vl]) => s + getDisb(vl, disbModeFor(gn), grpDisb[gn]?.customAmt || 0), 0);
 
+  if (loading) return <div style={{ background: '#161616', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui,sans-serif' }}><div style={{ color: '#555', fontSize: 13, letterSpacing: 1 }}>LOADING…</div></div>;
+
   return (
     <div style={{ fontFamily: 'system-ui,sans-serif', background: '#fff', minHeight: '100vh' }}>
       {/* HEADER */}
@@ -204,6 +244,7 @@ export default function App() {
           <button onClick={exportCSV} style={{ ...bS(false), fontSize: 10 }}>CSV</button>
           <button onClick={exportJSON} style={{ ...bS(false), fontSize: 10 }}>JSON</button>
           <label style={{ ...bS(false), fontSize: 10, cursor: 'pointer' }}>Import<input type="file" accept=".json" onChange={importJSON} style={{ display: 'none' }} /></label>
+          <button onClick={() => supabase.auth.signOut()} style={{ ...bS(false), fontSize: 10, color: '#d43030', borderColor: 'rgba(212,48,48,.25)' }}>Sign Out</button>
         </div>
       </div>
 
