@@ -200,13 +200,21 @@ export default function App() {
   const saveVenue = async () => {
     if (!form.gn || !form.vn) return;
     const m = form.mz != null && form.mz !== '' ? +form.mz : Math.round(form.fin * 0.7 + form.red * 0.3);
-    const entry = { ...form, mz: m, pi: (form.p2 || 0) * 0.2, id: editId || Date.now().toString(36) + Math.random().toString(36).substr(2, 5), str: (form.str || []).filter(Boolean), wk: (form.wk || []).filter(Boolean) };
-    const prev = [...venues];
-    const u = editId ? venues.map(x => x.id === editId ? entry : x) : [...venues, entry];
-    setVenues(u);
+    const entry = { ...form, mz: m, pi: (form.p2 || 0) * 0.2, str: (form.str || []).filter(Boolean), wk: (form.wk || []).filter(Boolean) };
     setForm(empty); setEditId(null); setShowForm(false);
-    const { error } = await supabase.from('venues').upsert(venueToDB(entry), { onConflict: 'id' });
-    if (error) { setVenues(prev); alert('Save failed — ' + error.message); }
+    if (editId) {
+      entry.id = editId;
+      const prev = [...venues];
+      setVenues(venues.map(x => x.id === editId ? entry : x));
+      const { error } = await supabase.from('venues').upsert(venueToDB(entry), { onConflict: 'id' });
+      if (error) { setVenues(prev); alert('Save failed — ' + error.message); }
+    } else {
+      const dbRow = venueToDB(entry);
+      delete dbRow.id;
+      const { data, error } = await supabase.from('venues').insert(dbRow).select('id').single();
+      if (error) { alert('Save failed — ' + error.message); return; }
+      setVenues(v => [...v, { ...entry, id: data.id }]);
+    }
   };
   const delV = async id => {
     const prev = [...venues];
