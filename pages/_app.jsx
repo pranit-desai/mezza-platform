@@ -15,25 +15,27 @@ export default function App({ Component, pageProps }) {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) { setSession(null); setChecking(false); return; }
+      const session = data?.session ?? null;
       if (session && !domainAllowed(session.user?.email)) {
-        supabase.auth.signOut().then(() => {
-          setSession(null);
-          setChecking(false);
-          router.push('/login?error=domain');
-        });
+        supabase.auth.signOut()
+          .then(() => { setSession(null); setChecking(false); router.push('/login?error=domain'); })
+          .catch(() => { setSession(null); setChecking(false); router.push('/login?error=domain'); });
       } else {
         setSession(session);
         setChecking(false);
       }
+    }).catch(() => {
+      setSession(null);
+      setChecking(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session && !domainAllowed(session.user?.email)) {
-        supabase.auth.signOut().then(() => {
-          setSession(null);
-          router.push('/login?error=domain');
-        });
+        supabase.auth.signOut().catch(() => {});
+        setSession(null);
+        router.push('/login?error=domain');
       } else {
         setSession(session);
       }

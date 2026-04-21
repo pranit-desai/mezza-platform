@@ -197,16 +197,23 @@ export default function App() {
     await supabase.from('tracker').upsert({ group_name: gn, status: t.status || '', pilot_amt: t.pilotAmt || 0, pilot_date: t.pilotDate || null, p1_amt: t.p1Amt || 0, p1_date: t.p1Date || null, p2_date: t.p2Date || null, notes: t.notes || '' }, { onConflict: 'group_name' });
   };
 
-  const saveVenue = () => {
+  const saveVenue = async () => {
     if (!form.gn || !form.vn) return;
     const m = form.mz != null && form.mz !== '' ? +form.mz : Math.round(form.fin * 0.7 + form.red * 0.3);
     const entry = { ...form, mz: m, pi: (form.p2 || 0) * 0.2, id: editId || Date.now().toString(36) + Math.random().toString(36).substr(2, 5), str: (form.str || []).filter(Boolean), wk: (form.wk || []).filter(Boolean) };
+    const prev = [...venues];
     const u = editId ? venues.map(x => x.id === editId ? entry : x) : [...venues, entry];
     setVenues(u);
-    supabase.from('venues').upsert(venueToDB(entry), { onConflict: 'id' });
     setForm(empty); setEditId(null); setShowForm(false);
+    const { error } = await supabase.from('venues').upsert(venueToDB(entry), { onConflict: 'id' });
+    if (error) { setVenues(prev); alert('Save failed — ' + error.message); }
   };
-  const delV = id => { const u = venues.filter(x => x.id !== id); setVenues(u); supabase.from('venues').delete().eq('id', id); };
+  const delV = async id => {
+    const prev = [...venues];
+    setVenues(venues.filter(x => x.id !== id));
+    const { error } = await supabase.from('venues').delete().eq('id', id);
+    if (error) { setVenues(prev); alert('Delete failed — ' + error.message); }
+  };
   const editV = v => { setForm({ ...v, str: v.str?.length ? v.str : [''], wk: v.wk?.length ? v.wk : [''] }); setEditId(v.id); setShowForm(true); };
   const setDc = (g, val) => { const d = { ...decs, [g]: val }; setDecs(d); saveGrp(g, d, rats, grpDisb); };
   const setRt = (g, val) => { const r = { ...rats, [g]: val }; setRats(r); saveGrp(g, decs, r, grpDisb); };
