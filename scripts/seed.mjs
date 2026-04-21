@@ -63,19 +63,58 @@ V0.forEach(v => {
   if (!groupMap[v.gn]) groupMap[v.gn] = { dec: v.dec || 'Pending', rat: v.rat || '' };
 });
 
-const venues = V0.map(({ dec: _d, rat: _r, ...v }) => v);
-
-const groups = Object.entries(groupMap).map(([gn, { dec, rat }]) => ({
-  gn, dec, rat, mode: 'Recommended', custom_amt: 0, p1_amt: 0, p2_amt: 0,
-  pilot_disbursed: 0, p1_disbursed: 0, p2_disbursed: 0,
+// Map short app keys → actual DB column names (id is auto-generated integer, omit it)
+const venueRows = V0.map(({ id: _id, gn, vn, rg, rev, fin, red, mz, ceil, la, vr, pi, p1, p2, an, poc, dt, loc, url, str, wk, dec, rat }) => ({
+  group_name: gn,
+  venue_name: vn,
+  region: rg,
+  revenue: rev,
+  fin_score: fin,
+  red_score: red,
+  mezza_score: mz,
+  ceiling_pct: ceil,
+  lending_amt: la,
+  votes_required: vr,
+  pilot: pi,
+  p1,
+  p2,
+  analyst: an,
+  poc,
+  case_date: dt,
+  location: loc,
+  sheet_url: url,
+  strengths: str,
+  weaknesses: wk,
+  decision: dec,
+  rationale: rat,
 }));
 
-console.log(`Seeding ${venues.length} venues across ${groups.length} groups…`);
+const groupRows = Object.entries(groupMap).map(([gn, { dec, rat }]) => ({
+  name: gn,
+  decision: dec,
+  rationale: rat,
+  disb_mode: 'Recommended',
+  custom_amt: 0,
+  p1_amt: 0,
+  p2_amt: 0,
+  pilot_disbursed: 0,
+  p1_disbursed: 0,
+  p2_disbursed: 0,
+}));
 
-const { error: ve } = await sb.from('venues').upsert(venues, { onConflict: 'id' });
-if (ve) { console.error('venues error:', ve.message); process.exit(1); }
+console.log(`Seeding ${venueRows.length} venues across ${groupRows.length} groups…`);
 
-const { error: ge } = await sb.from('groups').upsert(groups, { onConflict: 'gn' });
+// venues FK → groups, so delete venues first, then groups; insert groups first, then venues
+const { error: vde } = await sb.from('venues').delete().not('id', 'is', null);
+if (vde) { console.error('venues delete error:', vde.message); process.exit(1); }
+
+const { error: gde } = await sb.from('groups').delete().not('id', 'is', null);
+if (gde) { console.error('groups delete error:', gde.message); process.exit(1); }
+
+const { error: ge } = await sb.from('groups').insert(groupRows);
 if (ge) { console.error('groups error:', ge.message); process.exit(1); }
+
+const { error: ve } = await sb.from('venues').insert(venueRows);
+if (ve) { console.error('venues error:', ve.message); process.exit(1); }
 
 console.log('Seed complete.');
