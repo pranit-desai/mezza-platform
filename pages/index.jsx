@@ -45,11 +45,29 @@ const V0 = [
 ];
 
 const venueFromDB = v => ({
-  id: v.id, gn: v.group_name, vn: v.venue_name, rg: v.region, rev: v.revenue,
-  fin: v.fin_score, red: v.red_score, mz: v.mezza_score, ceil: v.ceiling_pct,
-  la: v.lending_amt, vr: v.votes_required, pi: v.pilot, p1: v.p1, p2: v.p2,
-  an: v.analyst, poc: v.poc, dt: v.case_date, loc: v.location, url: v.sheet_url,
-  str: v.strengths || [], wk: v.weaknesses || [], dec: v.decision, rat: v.rationale,
+  id: v.id,
+  gn: v.group_name ?? v.gn,
+  vn: v.venue_name ?? v.vn,
+  rg: v.region ?? v.rg,
+  rev: v.revenue ?? v.rev,
+  fin: v.fin_score ?? v.fin,
+  red: v.red_score ?? v.red,
+  mz: v.mezza_score ?? v.mz,
+  ceil: v.ceiling_pct ?? v.ceil,
+  la: v.lending_amt ?? v.la,
+  vr: v.votes_required ?? v.vr,
+  pi: v.pilot ?? v.pi,
+  p1: v.p1,
+  p2: v.p2,
+  an: v.analyst ?? v.an,
+  poc: v.poc,
+  dt: v.case_date ?? v.dt,
+  loc: v.location ?? v.loc,
+  url: v.sheet_url ?? v.url,
+  str: v.strengths ?? v.str ?? [],
+  wk: v.weaknesses ?? v.wk ?? [],
+  dec: v.decision ?? v.dec,
+  rat: v.rationale ?? v.rat,
 });
 const venueToDB = v => ({
   id: v.id, group_name: v.gn, venue_name: v.vn, region: v.rg, revenue: v.rev,
@@ -96,6 +114,7 @@ function getDisb(vl, sel, customAmt) {
 function Bdg({s, big}) {
   const b = gB(s), c = sc(s);
   const sz = big ? { padding: '6px 14px', fontSize: 15, fontWeight: 900 } : { padding: '4px 10px', fontSize: 13, fontWeight: 800 };
+  if (s == null || isNaN(s)) return null;
   return <span style={{ ...sz, borderRadius: 8, background: c + '25', color: c, whiteSpace: 'nowrap', display: 'inline-block', margin: 2, border: '1px solid ' + c + '40' }}>{s.toFixed(1)} <span style={{ fontSize: big ? 12 : 10, opacity: .8 }}>{b.g}</span></span>;
 }
 
@@ -150,15 +169,18 @@ export default function App() {
       if (gd?.length) {
         const dc = {}, rt = {}, gdMap = {};
         gd.forEach(row => {
-          if (row.decision) dc[row.name] = row.decision;
-          if (row.rationale) rt[row.name] = row.rationale;
-          gdMap[row.name] = { mode: row.disb_mode || 'Recommended', customAmt: row.custom_amt || 0, p1Amt: row.p1_amt || 0, p2Amt: row.p2_amt || 0, pilotDisbursed: row.pilot_disbursed || 0, p1Disbursed: row.p1_disbursed || 0, p2Disbursed: row.p2_disbursed || 0 };
+          const key = row.name ?? row.gn;
+          const dec = row.decision ?? row.dec;
+          const rat = row.rationale ?? row.rat;
+          if (dec) dc[key] = dec;
+          if (rat) rt[key] = rat;
+          gdMap[key] = { mode: row.disb_mode ?? row.mode ?? 'Recommended', customAmt: row.custom_amt || 0, p1Amt: row.p1_amt || 0, p2Amt: row.p2_amt || 0, pilotDisbursed: row.pilot_disbursed || 0, p1Disbursed: row.p1_disbursed || 0, p2Disbursed: row.p2_disbursed || 0 };
         });
         setDecs(dc); setRats(rt); setGrpDisb(gdMap);
       }
       if (td?.length) {
         const tk = {};
-        td.forEach(row => { tk[row.group_name] = { status: row.status || '', pilotAmt: row.pilot_amt || 0, pilotDate: row.pilot_date || '', p1Amt: row.p1_amt || 0, p1Date: row.p1_date || '', p2Date: row.p2_date || '', notes: row.notes || '' }; });
+        td.forEach(row => { tk[row.group_name ?? row.gn] = { status: row.status || '', pilotAmt: row.pilot_amt || 0, pilotDate: row.pilot_date || '', p1Amt: row.p1_amt || 0, p1Date: row.p1_date || '', p2Date: row.p2_date || '', notes: row.notes || '' }; });
         setTracker(tk);
       }
       if (mounted) setLoading(false);
