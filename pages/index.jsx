@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
 import { supabase } from '../lib/supabaseClient';
 
@@ -70,11 +70,17 @@ const venueFromDB = v => ({
   rat: v.rationale ?? v.rat,
 });
 const venueToDB = v => ({
-  id: v.id, group_name: v.gn, venue_name: v.vn, region: v.rg, revenue: v.rev,
-  fin_score: v.fin, red_score: v.red, mezza_score: v.mz, ceiling_pct: v.ceil,
-  lending_amt: v.la, votes_required: v.vr, pilot: v.pi, p1: v.p1, p2: v.p2,
-  analyst: v.an, poc: v.poc, case_date: v.dt, location: v.loc, sheet_url: v.url,
-  strengths: v.str, weaknesses: v.wk, decision: v.dec, rationale: v.rat,
+  id: v.id,
+  group_name: v.gn || '', venue_name: v.vn || '', region: v.rg || 'UAE',
+  revenue: +v.rev || 0, fin_score: +v.fin || 0, red_score: +v.red || 0,
+  mezza_score: v.mz != null && v.mz !== '' && !isNaN(+v.mz) ? +v.mz : null,
+  ceiling_pct: +v.ceil || 0, lending_amt: +v.la || 0, votes_required: +v.vr || 0,
+  pilot: +v.pi || 0, p1: +v.p1 || 0, p2: +v.p2 || 0,
+  analyst: v.an || '', poc: v.poc || '', case_date: v.dt || null,
+  location: v.loc || '', sheet_url: v.url || '',
+  strengths: Array.isArray(v.str) ? v.str.filter(Boolean) : [],
+  weaknesses: Array.isArray(v.wk) ? v.wk.filter(Boolean) : [],
+  decision: v.dec || null, rationale: v.rat || '',
 });
 
 const BANDS=[{min:90,max:100,c:5,v:1,g:'A+'},{min:80,max:89.99,c:4,v:1,g:'A'},{min:70,max:79.99,c:3,v:2,g:'B+'},{min:60,max:69.99,c:2,v:2,g:'B'},{min:55,max:59.99,c:1,v:3,g:'C+'},{min:50,max:54.99,c:1,v:3,g:'C'},{min:0,max:49.99,c:0,v:0,g:'NM'}];
@@ -156,71 +162,76 @@ export default function App() {
   const empty = { gn: '', vn: '', rg: 'UAE', rev: 0, fin: 0, red: 0, mz: null, ceil: 0, la: 0, vr: 0, pi: 0, p1: 0, p2: 0, an: 'Pranit', poc: 'Justin', dt: new Date().toISOString().split('T')[0], loc: '', url: '', str: [''], wk: [''] };
   const [form, setForm] = useState(empty);
 
+  const fetchAll = useCallback(async () => {
+    const [{ data: vd }, { data: gd }, { data: td }] = await Promise.all([
+      supabase.from('venues').select('*').order('id'),
+      supabase.from('groups').select('*'),
+      supabase.from('tracker').select('*'),
+    ]);
+    if (vd) setVenues(vd.map(venueFromDB));
+    if (gd?.length) {
+      const dc = {}, rt = {}, gdMap = {};
+      gd.forEach(row => {
+        const key = row.name;
+        if (row.decision) dc[key] = row.decision;
+        if (row.rationale) rt[key] = row.rationale;
+        gdMap[key] = { mode: row.disb_mode || 'Recommended', customAmt: row.custom_amt || 0, p1Amt: row.p1_amt || 0, p2Amt: row.p2_amt || 0, pilotDisbursed: row.pilot_disbursed || 0, p1Disbursed: row.p1_disbursed || 0, p2Disbursed: row.p2_disbursed || 0 };
+      });
+      setDecs(dc); setRats(rt); setGrpDisb(gdMap);
+    }
+    if (td?.length) {
+      const tk = {};
+      td.forEach(row => { tk[row.group_name] = { status: row.status || '', pilotAmt: row.pilot_amt || 0, pilotDate: row.pilot_date || '', p1Amt: row.p1_amt || 0, p1Date: row.p1_date || '', p2Date: row.p2_date || '', notes: row.notes || '' }; });
+      setTracker(tk);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      const [{ data: vd }, { data: gd }, { data: td }] = await Promise.all([
-        supabase.from('venues').select('*').order('id'),
-        supabase.from('groups').select('*'),
-        supabase.from('tracker').select('*'),
-      ]);
-      if (!mounted) return;
-      if (vd?.length) setVenues(vd.map(venueFromDB));
-      if (gd?.length) {
-        const dc = {}, rt = {}, gdMap = {};
-        gd.forEach(row => {
-          const key = row.name ?? row.gn;
-          const dec = row.decision ?? row.dec;
-          const rat = row.rationale ?? row.rat;
-          if (dec) dc[key] = dec;
-          if (rat) rt[key] = rat;
-          gdMap[key] = { mode: row.disb_mode ?? row.mode ?? 'Recommended', customAmt: row.custom_amt || 0, p1Amt: row.p1_amt || 0, p2Amt: row.p2_amt || 0, pilotDisbursed: row.pilot_disbursed || 0, p1Disbursed: row.p1_disbursed || 0, p2Disbursed: row.p2_disbursed || 0 };
-        });
-        setDecs(dc); setRats(rt); setGrpDisb(gdMap);
-      }
-      if (td?.length) {
-        const tk = {};
-        td.forEach(row => { tk[row.group_name ?? row.gn] = { status: row.status || '', pilotAmt: row.pilot_amt || 0, pilotDate: row.pilot_date || '', p1Amt: row.p1_amt || 0, p1Date: row.p1_date || '', p2Date: row.p2_date || '', notes: row.notes || '' }; });
-        setTracker(tk);
-      }
-      if (mounted) setLoading(false);
-    })();
+    fetchAll().catch(console.error).finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
-  }, []);
+  }, [fetchAll]);
 
   const saveGrp = async (gn, d, r, gd) => {
     const g = gd[gn] || {};
-    await supabase.from('groups').upsert({ name: gn, decision: d[gn] || 'Pending', rationale: r[gn] || '', disb_mode: g.mode || 'Recommended', custom_amt: g.customAmt || 0, p1_amt: g.p1Amt || 0, p2_amt: g.p2Amt || 0, pilot_disbursed: g.pilotDisbursed || 0, p1_disbursed: g.p1Disbursed || 0, p2_disbursed: g.p2Disbursed || 0 }, { onConflict: 'name' });
+    const { error } = await supabase.from('groups').upsert({ name: gn, decision: d[gn] || 'Pending', rationale: r[gn] || '', disb_mode: g.mode || 'Recommended', custom_amt: g.customAmt || 0, p1_amt: g.p1Amt || 0, p2_amt: g.p2Amt || 0, pilot_disbursed: g.pilotDisbursed || 0, p1_disbursed: g.p1Disbursed || 0, p2_disbursed: g.p2Disbursed || 0 }, { onConflict: 'name' });
+    if (error) console.error('saveGrp:', error.message);
   };
   const saveTk = async (gn, tk) => {
     const t = tk[gn] || {};
-    await supabase.from('tracker').upsert({ group_name: gn, status: t.status || '', pilot_amt: t.pilotAmt || 0, pilot_date: t.pilotDate || null, p1_amt: t.p1Amt || 0, p1_date: t.p1Date || null, p2_date: t.p2Date || null, notes: t.notes || '' }, { onConflict: 'group_name' });
+    const { error } = await supabase.from('tracker').upsert({ group_name: gn, status: t.status || '', pilot_amt: t.pilotAmt || 0, pilot_date: t.pilotDate || null, p1_amt: t.p1Amt || 0, p1_date: t.p1Date || null, p2_date: t.p2Date || null, notes: t.notes || '' }, { onConflict: 'group_name' });
+    if (error) console.error('saveTk:', error.message);
   };
 
   const saveVenue = async () => {
-    if (!form.gn || !form.vn) return;
-    const m = form.mz != null && form.mz !== '' ? +form.mz : Math.round(form.fin * 0.7 + form.red * 0.3);
-    const entry = { ...form, mz: m, pi: (form.p2 || 0) * 0.2, str: (form.str || []).filter(Boolean), wk: (form.wk || []).filter(Boolean) };
+    if (!form.gn?.trim() || !form.vn?.trim()) return;
+    const m = form.mz != null && form.mz !== '' && !isNaN(+form.mz) ? +form.mz : Math.round((+form.fin || 0) * 0.7 + (+form.red || 0) * 0.3);
+    const entry = { ...form, mz: m, pi: (+form.p2 || 0) * 0.2, str: (form.str || []).filter(Boolean), wk: (form.wk || []).filter(Boolean) };
     setForm(empty); setEditId(null); setShowForm(false);
+
+    // Ensure the group row exists before writing the venue (prevents FK violations and missing group data)
+    const gd = grpDisb[form.gn] || {};
+    await supabase.from('groups').upsert(
+      { name: form.gn, decision: decs[form.gn] || 'Pending', rationale: rats[form.gn] || '', disb_mode: gd.mode || 'Recommended', custom_amt: gd.customAmt || 0, p1_amt: gd.p1Amt || 0, p2_amt: gd.p2Amt || 0, pilot_disbursed: gd.pilotDisbursed || 0, p1_disbursed: gd.p1Disbursed || 0, p2_disbursed: gd.p2Disbursed || 0 },
+      { onConflict: 'name' }
+    );
+
     if (editId) {
       entry.id = editId;
-      const prev = [...venues];
-      setVenues(venues.map(x => x.id === editId ? entry : x));
       const { error } = await supabase.from('venues').upsert(venueToDB(entry), { onConflict: 'id' });
-      if (error) { setVenues(prev); alert('Save failed — ' + error.message); }
+      if (error) { alert('Save failed — ' + error.message); await fetchAll(); return; }
     } else {
       const dbRow = venueToDB(entry);
       delete dbRow.id;
-      const { data, error } = await supabase.from('venues').insert(dbRow).select('id').single();
+      const { error } = await supabase.from('venues').insert(dbRow);
       if (error) { alert('Save failed — ' + error.message); return; }
-      setVenues(v => [...v, { ...entry, id: data.id }]);
     }
+    await fetchAll();
   };
   const delV = async id => {
-    const prev = [...venues];
-    setVenues(venues.filter(x => x.id !== id));
     const { error } = await supabase.from('venues').delete().eq('id', id);
-    if (error) { setVenues(prev); alert('Delete failed — ' + error.message); }
+    if (error) { alert('Delete failed — ' + error.message); return; }
+    await fetchAll();
   };
   const editV = v => { setForm({ ...v, str: v.str?.length ? v.str : [''], wk: v.wk?.length ? v.wk : [''] }); setEditId(v.id); setShowForm(true); };
   const setDc = (g, val) => { const d = { ...decs, [g]: val }; setDecs(d); saveGrp(g, d, rats, grpDisb); };
@@ -238,15 +249,25 @@ export default function App() {
       try {
         const d = JSON.parse(ev.target.result);
         if (d.v) {
-          setVenues(d.v); setDecs(d.d || {}); setRats(d.r || {}); setGrpDisb(d.gd || {}); setTracker(d.tk || {});
-          await supabase.from('venues').upsert(d.v.map(venueToDB), { onConflict: 'id' });
-          const gnSet = new Set([...Object.keys(d.d || {}), ...Object.keys(d.r || {}), ...Object.keys(d.gd || {})]);
+          // Groups first (prevents FK violations)
+          const gnSet = new Set([...d.v.map(v => v.gn).filter(Boolean), ...Object.keys(d.d || {}), ...Object.keys(d.r || {}), ...Object.keys(d.gd || {})]);
           const grpRows = [...gnSet].map(gn => { const g = (d.gd || {})[gn] || {}; return { name: gn, decision: (d.d || {})[gn] || 'Pending', rationale: (d.r || {})[gn] || '', disb_mode: g.mode || 'Recommended', custom_amt: g.customAmt || 0, p1_amt: g.p1Amt || 0, p2_amt: g.p2Amt || 0, pilot_disbursed: g.pilotDisbursed || 0, p1_disbursed: g.p1Disbursed || 0, p2_disbursed: g.p2Disbursed || 0 }; });
           if (grpRows.length) await supabase.from('groups').upsert(grpRows, { onConflict: 'name' });
+          // Venues: upsert if integer id exists, otherwise insert fresh (lets DB assign id)
+          await Promise.all(d.v.map(async v => {
+            const dbRow = venueToDB(v);
+            if (Number.isInteger(dbRow.id)) {
+              await supabase.from('venues').upsert(dbRow, { onConflict: 'id' });
+            } else {
+              delete dbRow.id;
+              await supabase.from('venues').insert(dbRow);
+            }
+          }));
           const tkRows = Object.entries(d.tk || {}).map(([gn, t]) => ({ group_name: gn, status: t.status || '', pilot_amt: t.pilotAmt || 0, pilot_date: t.pilotDate || null, p1_amt: t.p1Amt || 0, p1_date: t.p1Date || null, p2_date: t.p2Date || null, notes: t.notes || '' }));
           if (tkRows.length) await supabase.from('tracker').upsert(tkRows, { onConflict: 'group_name' });
+          await fetchAll();
         }
-      } catch (err) { alert('Invalid'); }
+      } catch (err) { alert('Import failed — ' + err.message); }
     };
     r.readAsText(f);
   };
@@ -296,7 +317,7 @@ export default function App() {
           <button onClick={exportCSV} style={{ ...bS(false), fontSize: 10 }}>CSV</button>
           <button onClick={exportJSON} style={{ ...bS(false), fontSize: 10 }}>JSON</button>
           <label style={{ ...bS(false), fontSize: 10, cursor: 'pointer' }}>Import<input type="file" accept=".json" onChange={importJSON} style={{ display: 'none' }} /></label>
-          <button onClick={() => supabase.auth.signOut()} style={{ ...bS(false), fontSize: 10, color: '#d43030', borderColor: 'rgba(212,48,48,.25)' }}>Sign Out</button>
+          <button onClick={() => supabase.auth.signOut().catch(() => {})} style={{ ...bS(false), fontSize: 10, color: '#d43030', borderColor: 'rgba(212,48,48,.25)' }}>Sign Out</button>
         </div>
       </div>
 

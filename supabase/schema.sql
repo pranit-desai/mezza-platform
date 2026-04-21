@@ -1,8 +1,11 @@
--- Run this in the Supabase SQL editor if your tables don't have these columns yet.
+-- Run this in the Supabase SQL editor to create tables from scratch.
+-- If upgrading an existing venues table from text id, run first:
+--   ALTER TABLE venues DROP COLUMN id CASCADE;
+--   ALTER TABLE venues ADD COLUMN id bigserial PRIMARY KEY;
 -- The app expects exactly these column names.
 
 create table if not exists venues (
-  id             text primary key,
+  id             bigserial primary key,
   group_name     text,
   venue_name     text,
   region         text default 'UAE',
